@@ -2,15 +2,15 @@ import random
 from math import *
 from scipy.stats import qmc
 import matplotlib.pyplot as plt
-import signal
 import copy
-import numpy as np
+from functools import reduce
+from operator import mul
 
 
-number_of_points = 128
-dimension = 100
-iter_count = 500
-skip_iterations = 1
+number_of_points = 70
+dimension = 1000
+iter_count = 300
+skip_iterations = 10
 delta_t = 1 / number_of_points
 kappa = 200
 
@@ -48,7 +48,7 @@ def dist(x_i, x_j):
 # points is a set of num points in a given dim
 # U_{1,1}
 def potential_energy(points):
-    num = number_of_points
+    num = cur_number
     dim = dimension
 
     U = 0
@@ -60,7 +60,7 @@ def potential_energy(points):
 
 
 def force(points):
-    num = number_of_points
+    num = cur_number
     dim = dimension
     re = [[0 for __ in range(dim)] for _ in range(num)]
 
@@ -78,8 +78,8 @@ def force(points):
 
 
 class PointGenerator:
-    def __init__(self):
-        self.num = number_of_points
+    def __init__(self, num):
+        self.num = num
         self.dim = dimension
         self.points = []
         self.velocities = []
@@ -165,43 +165,126 @@ def save_points(points, save_type):
             file.write("\n")
 
 
-app = PointGenerator()
+b_int1 = []
+b_int2 = []
+b_int3 = []
+b_int4 = []
 
+s_int1 = []
+s_int2 = []
+s_int3 = []
+s_int4 = []
 
-def build_graph():
-    plt.figure(figsize=(12, 7))
-    plt.title(f"num={number_of_points}, dim={dimension}, it={it}, skip={skip_iterations}")
-    plt.plot([skip_iterations * x for x in range(len(l2_discrepancy_list))], l2_discrepancy_list, 'm--', label='L2')
-    plt.legend()
-    plt.tight_layout()
-    plt.show()
+b_disc1 = []
+s_disc1 = []
 
-
-def save_on_exit():
-    print(f"\nSaving results of current iteration #{it}")
-    save_points(app.points, "modeled")
-    save_points(best_points, "best")
+for cur_number in range(2, number_of_points + 1):
+    app = PointGenerator(cur_number)
+    for _ in range(iter_count):
+        app.update()
+        it += 1
 
     sobol_engine = qmc.Sobol(d=dimension)  # scramble=True для рандомизации
-    sobol_points = np.array(sobol_engine.random(number_of_points))
-    modeled_l2_disc = qmc.discrepancy(app.points, method='L2-star')
-    print("Random L2  ", random_l2_disc)
-    print("Modeled L2 ", modeled_l2_disc)
-    print("Best L2    ", best_l2_disc)
-    print("Sobol L2   ", qmc.discrepancy(sobol_points, method='L2-star'))
-    build_graph()
+    sobol_points = list(sobol_engine.random(cur_number))
 
-    exit(0)
+    d = dimension
+    f1 = lambda x: reduce(mul, [1 + sqrt(12) * (x[j] - 0.5) / d for j in range(d)])
+    f2 = lambda x: sqrt(12 / d) * (sum(x) - d / 2)
+    f3 = lambda x: sqrt(45 / (4 * d)) * (sum([j ** 2 for j in x]) - d / 3)
+    f4 = lambda x: sqrt(18 / d) * (sum([sqrt(j) for j in x]) - 2 * d / 3)
+
+    b_int1.append(log(abs(sum([f1(pt) for pt in best_points]) / cur_number), e))
+    b_int2.append(log(abs(sum([f2(pt) for pt in best_points]) / cur_number), e))
+    b_int3.append(log(abs(sum([f3(pt) for pt in best_points]) / cur_number), e))
+    b_int4.append(log(abs(sum([f4(pt) for pt in best_points]) / cur_number), e))
+
+    s_int1.append(log(abs(sum([f1(pt) for pt in sobol_points]) / cur_number), e))
+    s_int2.append(log(abs(sum([f2(pt) for pt in sobol_points]) / cur_number), e))
+    s_int3.append(log(abs(sum([f3(pt) for pt in sobol_points]) / cur_number), e))
+    s_int4.append(log(abs(sum([f4(pt) for pt in sobol_points]) / cur_number), e))
+
+    b_disc1.append(qmc.discrepancy(best_points, method='L2-star'))
+    s_disc1.append(qmc.discrepancy(sobol_points, method='L2-star'))
+
+    best_points = []
+    best_l2_disc = 10000
+    it = 0
+    print(cur_number)
 
 
-signal.signal(signal.SIGINT, save_on_exit)
-signal.signal(signal.SIGTERM, save_on_exit)
+fig, axs = plt.subplots(2, 4, figsize=(16, 8))
+fig.suptitle('Comparing Sobol and Generated points error over iteration', fontsize=16)
+
+x = list(range(2, number_of_points + 1))
+
+b1 = max(max(s_int1), max(b_int1))
+axs[0, 0].plot(x, b_int1, color='blue')
+axs[0, 0].set_title("generated 1")
+axs[0, 0].set_ylim(-b1, b1)
+axs[0, 0].grid(True)
+
+axs[0, 1].plot(x, s_int1, color='blue')
+axs[0, 1].set_title("sobol 1")
+axs[0, 1].set_ylim(-b1, b1)
+axs[0, 1].grid(True)
+
+b2 = min(min(s_int2), min(b_int2))
+axs[0, 2].plot(x, b_int2, color='red')
+axs[0, 2].set_title("generated 2")
+axs[0, 2].set_ylim(b2, 0)
+axs[0, 2].grid(True)
+
+axs[0, 3].plot(x, s_int2, color='red')
+axs[0, 3].set_title("sobol 2")
+axs[0, 3].set_ylim(b2, 0)
+axs[0, 3].grid(True)
 
 
-for _ in range(iter_count):
-    if it % 20 == 0:
-        print("Iteration        ", it)
-    app.update()
-    it += 1
+b3 = min(min(s_int3), min(b_int3))
+axs[1, 0].plot(x, b_int3, color='green')
+axs[1, 0].set_title("generated 3")
+axs[1, 0].set_ylim(b3, 0)
+axs[1, 0].grid(True)
 
-save_on_exit()
+# График 2: Квадратичная функция
+axs[1, 1].plot(x, s_int3, color='green')
+axs[1, 1].set_title("sobol 3")
+axs[1, 1].set_ylim(b3, 0)
+axs[1, 1].grid(True)
+
+
+b4 = min(min(s_int4), min(b_int4))
+axs[1, 2].plot(x, b_int4, color='purple')
+axs[1, 2].set_title("generated 4")
+axs[1, 2].set_ylim(b4, 0)
+axs[1, 2].grid(True)
+
+axs[1, 3].plot(x, s_int4, color='purple')
+axs[1, 3].set_title("sobol 4")
+axs[1, 3].set_ylim(b4, 0)
+axs[1, 3].grid(True)
+
+
+fig1, axs1 = plt.subplots(1, 2, figsize=(12, 6))
+fig1.suptitle('Comparing Sobol and Generated points discrepancy over iteration', fontsize=16)
+
+x = list(range(2, number_of_points + 1))
+
+b5 = max(max(b_disc1), max(s_disc1))
+axs1[0].plot(x, b_disc1, color='blue')
+axs1[0].set_title("generated")
+axs1[0].set_ylim(0, b5)
+axs1[0].grid(True)
+
+axs1[1].plot(x, s_disc1, color='red')
+axs1[1].set_title("sobol")
+axs1[1].set_ylim(0, b5)
+axs1[1].grid(True)
+
+
+# Настраиваем отступы между графиками
+plt.tight_layout()
+
+# Показываем графики
+plt.show()
+
